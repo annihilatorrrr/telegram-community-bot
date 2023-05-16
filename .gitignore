@@ -37,3 +37,9 @@ lerna-debug.log*
 # Configs
 .env.*
 /config
+
+# public
+!/public/firmachain.png
+
+# Package
+package-lock.json

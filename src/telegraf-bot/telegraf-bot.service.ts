@@ -1,21 +1,25 @@
 import { Ctx, On, Update } from 'nestjs-telegraf';
 import { Context } from 'telegraf';
+import { ConfigService } from '@nestjs/config';
+import { SchedulerRegistry, Timeout } from '@nestjs/schedule';
 
-import { getAlertMessage, getRestrictPermission } from '../common/message.common';
-import { MessageUtilService } from 'src/utils/message.util';
+import { getAlertMessage, getRestrictPermission, getWelcomeNotice } from '../common/message.common';
 
 @Update()
-export class BotUpdate {
+export class TelegrafBotService {
+  private messageTimeouts = new Map<number, NodeJS.Timeout>();
+  private startDate: number;
+
   constructor(
-    private readonly messageUtilService: MessageUtilService
+    private schedulerRegistry: SchedulerRegistry,
+    private configService: ConfigService, 
   ) {
     this.startDate = Math.floor(new Date().getTime() / 1000);
   }
 
-  private startDate: number;
-
   @On('new_chat_members')
-  async newChatMembers(@Ctx() ctx: Context) {
+  async newChatMembers(@Ctx() ctx: Context): Promise<void> {
+    // set variables
     const messageDate = ctx.message.date;
     const messageId = ctx.message.message_id;
     const isBot = ctx.message.from.is_bot;
@@ -59,48 +63,23 @@ export class BotUpdate {
     const message = await ctx.reply(restrictPermission.message, {
       reply_markup: restrictPermission.query.reply_markup
     });
-    
-    this.messageUtilService.addMessage(message.message_id, Math.floor(new Date().getTime() / 1000));
 
-    setTimeout(async () => {
+    const callback = async () => {
       try {
-        const chatId = ctx.chat.id;
-        // check delete message id
-        await ctx.telegram.getChatMember(chatId, message.message_id);
-        // 
-        await ctx.deleteMessage(message.message_id);
-      } catch (e) {
-        // log (already delete message)
-        console.log(e);
-
-        setTimeout(async () => {
-          const chatId = ctx.chat.id;
-          // check delete message id
-          await ctx.telegram.getChatMember(chatId, message.message_id);
-          // 
-          await ctx.deleteMessage(message.message_id);
-        }, 5 * 60 * 1000);
+        await ctx.deleteMessage(messageId);
+      } catch (error) {
+        console.error(error);
+      } finally {
+        this.messageTimeouts.delete(messageId);
       }
-    }, 3 * 60 * 1000);
-  }
-
-  @On('left_chat_member')
-  async leftChatMember(@Ctx() ctx: Context) {
-    const messageDate = ctx.message.date;
-    const messageId = ctx.message.message_id;
-    const userId = ctx.message.from.id;
-
-    if (this.startDate >= messageDate) {
-      // winston log
-      // Exclude users who accessed before running the bot.
-      return ;
     }
 
-    await ctx.deleteMessage(messageId);
+    const timeout = setTimeout(callback, this.configService.get<number>('DELETE_MSG_TIMEOUT') * 1000 * 60);
+    this.messageTimeouts.set(message.message_id, timeout);
   }
 
   @On('callback_query')
-  async callbackQuery(@Ctx() ctx: Context) {
+  async callbackQuery(@Ctx() ctx: Context): Promise<void> {
     let languageCode = "";
 
     // If the message has been deleted
@@ -116,17 +95,18 @@ export class BotUpdate {
     // Queries the information of the user who pressed the Permission button.
     const userId = ctx.callbackQuery.from.id;
     const messageId = ctx.callbackQuery.message.message_id;
+    const userName = ctx.callbackQuery.from.username;
 
     // Gets the callback query data.
     const queryUserId = JSON.parse(ctx.callbackQuery['data']);
-    
+
     if (queryUserId !== userId) {
       // The button was pressed by a user who has already acquired permission.
       await ctx.answerCbQuery(getAlertMessage(languageCode, "alertUserCheck"), {
         show_alert: true
       });
-      
       return ;
+
     } else if (queryUserId === userId) {
       // If you clicked your own message, turn off the restriction.
       await ctx.restrictChatMember(userId, {
@@ -135,20 +115,50 @@ export class BotUpdate {
         }
       });
 
-      await ctx.deleteMessage(messageId)
+      // Delete message
+      const timeout = this.messageTimeouts.get(messageId);
+      if (timeout) {
+        clearTimeout(timeout);
+        await ctx.deleteMessage(messageId);
+
+        this.messageTimeouts.delete(messageId);
+        const notice = getWelcomeNotice(languageCode, userName);
+        
+        try {
+          await ctx.sendPhoto({
+            source: 'public/firmachain.png'
+          }, {
+            caption: notice.message,
+            reply_markup: notice.query.reply_markup,
+            parse_mode: 'Markdown'
+          });
+        } catch (e) {
+          console.log(e);
+        }
+      }
     }
   }
 
-  @On('message')
-  async testMessage(@Ctx() ctx: Context) {
-    // console.log(ctx.myChatMember);
-    console.log(ctx.message);
+  @On('left_chat_member')
+  async leftChatMember(@Ctx() ctx: Context): Promise<void> {
+    const messageDate = ctx.message.date;
+    const messageId = ctx.message.message_id;
+    const userId = ctx.message.from.id;
+
+    if (this.startDate >= messageDate) {
+      // winston log
+      // Exclude users who accessed before running the bot.
+      return ;
+    }
+
+    await ctx.deleteMessage(messageId);
   }
 
-  async messageScheduler() {
-    setInterval(() => {
-      
-    }, 5000);
+  @Timeout(1000 * 60 * 5)
+  cleanup() {
+    this.schedulerRegistry.getTimeouts().forEach((timeout) => {
+      clearTimeout(timeout);
+      this.schedulerRegistry.deleteTimeout(timeout);
+    });
   }
 }
-

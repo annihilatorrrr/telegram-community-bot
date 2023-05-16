@@ -1,17 +1,14 @@
 import { Module } from '@nestjs/common';
-import { ConfigModule } from '@nestjs/config';
 
-import { AppController } from './app.controller';
-import { BotModule } from 'src/bot/bot.module';
+import { TelegrafBotModule } from '../telegraf-bot/telegraf-bot.module';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
     ConfigModule.forRoot({
       envFilePath: '.env.production'
     }),
-    BotModule
+    TelegrafBotModule,
   ],
-  controllers: [AppController],
-  providers: []
 })
 export class AppModule {}

@@ -1,6 +1,5 @@
 import localeConfig from 'public/locale.config.json';
 
-// import 
 export function getRestrictPermission(languageCode: string, userName: string) {
   const language = languageCode === 'ko' ? languageCode : "en";
   const restrictPermission = localeConfig[language].permission;
