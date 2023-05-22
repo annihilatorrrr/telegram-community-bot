@@ -5,6 +5,7 @@ import { session } from 'telegraf';
 
 import { TelegrafBotService } from './telegraf-bot.service';
 import { SchedulerRegistry } from '@nestjs/schedule';
+import { FileService } from 'src/file/fileService.service';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { SchedulerRegistry } from '@nestjs/schedule';
       inject: [ConfigService]
     }),
   ],
-  providers: [SchedulerRegistry, ConfigService, TelegrafBotService]
+  providers: [ConfigService, TelegrafBotService, SchedulerRegistry, FileService],
+  controllers: []
 })
 export class TelegrafBotModule {}

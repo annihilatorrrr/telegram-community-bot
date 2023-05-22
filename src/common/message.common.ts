@@ -1,17 +1,17 @@
 import localeConfig from 'public/locale.config.json';
 
 export function getRestrictPermission(languageCode: string, userName: string) {
-  const language = languageCode === 'ko' ? languageCode : "en";
+  const language = languageCode !== 'en' ? languageCode : "en";
   const restrictPermission = localeConfig[language].permission;
 
   return {
     message: `${userName}${restrictPermission.message}`,
-    query: restrictPermission.query
+    button: restrictPermission.button
   };
 }
 
 export function getWelcomeNotice(languageCode: string, userName: string) {
-  const language = languageCode === 'ko' ? languageCode : "en";
+  const language = languageCode !== 'en' ? languageCode : "en";
   const welcomeNotice = localeConfig[language].notice;
   const replaceNameNotice = welcomeNotice.message.replace('XXX', userName);
 
@@ -22,7 +22,7 @@ export function getWelcomeNotice(languageCode: string, userName: string) {
 }
 
 export function getAlertMessage(languageCode: string, type: string) {
-  const language = languageCode === 'ko' ? languageCode : "en";
+  const language = languageCode !== 'en' ? languageCode : "en";
   
   return localeConfig[language][type];
 }

@@ -1,164 +1,152 @@
-import { Ctx, On, Update } from 'nestjs-telegraf';
-import { Context } from 'telegraf';
+import { Ctx, On, Update, Action } from 'nestjs-telegraf';
+import { Context, Markup } from 'telegraf';
+import { User } from 'telegraf/typings/core/types/typegram';
 import { ConfigService } from '@nestjs/config';
-import { SchedulerRegistry, Timeout } from '@nestjs/schedule';
+import { Injectable } from '@nestjs/common';
 
 import { getAlertMessage, getRestrictPermission, getWelcomeNotice } from '../common/message.common';
+import { FileService } from 'src/file/fileService.service';
 
+@Injectable()
 @Update()
 export class TelegrafBotService {
-  private messageTimeouts = new Map<number, NodeJS.Timeout>();
-  private startDate: number;
-
+  private groupChatId: string;
+  private startTime: number;
+  
   constructor(
-    private schedulerRegistry: SchedulerRegistry,
-    private configService: ConfigService, 
+    private readonly configService: ConfigService,
+    private readonly fileService: FileService
   ) {
-    this.startDate = Math.floor(new Date().getTime() / 1000);
+    this.groupChatId = this.configService.get<string>('GROUP_CHAT_ID');
+    this.startTime = Date.now();
   }
 
   @On('new_chat_members')
-  async newChatMembers(@Ctx() ctx: Context): Promise<void> {
-    // set variables
-    const messageDate = ctx.message.date;
-    const messageId = ctx.message.message_id;
-    const isBot = ctx.message.from.is_bot;
-    const userId = ctx.message.from.id;
-    const userName = ctx.message.from.first_name;
-    const languageCode = ctx.message.from.language_code;
-
-    // Bot user detection
-    if (isBot) {
-      await ctx.banChatMember(userId);
-      return ;
-    }
-
-    // Ignore past participation messages
-    if (this.startDate >= messageDate) {
-      return ;
-    }
-
-    // Delete group join message
-    await ctx.deleteMessage(messageId);
-
-    // Setting restrict permissions for users who participate in a group
-    await ctx.restrictChatMember(userId, {
-      permissions: {
-        can_send_messages: false,
-        can_send_photos: false,
-        can_send_videos: false,
-        can_send_polls: false,
-        can_change_info: false,
-        can_invite_users: false,
-        can_pin_messages: false,
-        can_send_other_messages: false,
-        can_add_web_page_previews: false        
+  async onNewChatMembers(@Ctx() ctx: Context): Promise<void> {
+    if (ctx.chat.id.toString() === this.groupChatId) {
+      if (this.startTime <= ctx.message.date) {
+        return;
       }
-    });
 
-    // 
-    const restrictPermission = getRestrictPermission(languageCode, userName);
-    restrictPermission.query.reply_markup.inline_keyboard[0][0].callback_data = userId.toString();
-    
-    const message = await ctx.reply(restrictPermission.message, {
-      reply_markup: restrictPermission.query.reply_markup
-    });
+      // Delete group join message
+      await ctx.deleteMessage(ctx.message.message_id);
 
-    const callback = async () => {
-      try {
-        await ctx.deleteMessage(messageId);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        this.messageTimeouts.delete(messageId);
+      // Data exists unconditionally because this function is accessed only when an event defined in the decorator occurs.
+      // So you don't have to use the phrase "try catch".
+      const newChatMembers: User[] = ctx.update['message']['new_chat_members'];
+
+      for (const member of newChatMembers) {
+        if (!member.is_bot) {
+          // Setting restrict permissions for users who participate in a group
+          await ctx.restrictChatMember(member.id, {
+            permissions: {
+              can_send_messages: false,
+              can_send_photos: false,
+              can_send_videos: false,
+              can_send_polls: false,
+              can_change_info: false,
+              can_invite_users: false,
+              can_pin_messages: false,
+              can_send_other_messages: false,
+              can_add_web_page_previews: false
+            }
+          });
+
+          const languageCode = ctx.message.from.language_code;
+          const firstName = ctx.message.from.first_name;
+          const chatId = ctx.chat.id;
+
+          const restrictInfo = getRestrictPermission(languageCode, firstName);
+          const restrictMessage = await ctx.reply(restrictInfo.message, Markup.inlineKeyboard([
+            Markup.button.callback(restrictInfo.button, `unrestrict-${member.id}`)
+          ]));
+
+          // Registering the message deletion scheduler.
+          this.fileService.appendRestrictMessage(chatId, restrictMessage.message_id, Date.now());
+        } else {
+          await ctx.banChatMember(member.id);
+        }
       }
+    } else {
+      await ctx.answerCbQuery("Unacceptable group channel.", {
+        show_alert: true
+      });
     }
-
-    const timeout = setTimeout(callback, this.configService.get<number>('DELETE_MSG_TIMEOUT') * 1000 * 60);
-    this.messageTimeouts.set(message.message_id, timeout);
   }
 
-  @On('callback_query')
-  async callbackQuery(@Ctx() ctx: Context): Promise<void> {
-    let languageCode = "";
+  @Action(/unrestrict-.+/)
+  async onCallbackQuery(@Ctx() ctx: Context): Promise<void> {
+    try {
+      if (ctx.callbackQuery !== undefined) {
+        const queryData: string = ctx.callbackQuery['data'];
+        const userId = parseInt(queryData.split('-')[1]);
+        const messageId = ctx.callbackQuery.message.message_id;
+        const languageCode = ctx.callbackQuery.from.language_code;
+        const firstName = ctx.callbackQuery.from.first_name;
+        const chatId = ctx.chat.id;
 
-    // If the message has been deleted
-    if (ctx.callbackQuery === undefined) {
-      languageCode = ctx.callbackQuery.from.language_code;
-      await ctx.answerCbQuery(getAlertMessage(languageCode, "alertNotFoundMessage"), {
-        show_alert: true
-      });
+        if (ctx.callbackQuery.from.id === userId) {
+          await ctx.restrictChatMember(userId, { permissions: { can_send_messages: true } });
 
-      return ;
-    }
+          await ctx.deleteMessage(messageId);
 
-    // Queries the information of the user who pressed the Permission button.
-    const userId = ctx.callbackQuery.from.id;
-    const messageId = ctx.callbackQuery.message.message_id;
-    const userName = ctx.callbackQuery.from.username;
-
-    // Gets the callback query data.
-    const queryUserId = JSON.parse(ctx.callbackQuery['data']);
-
-    if (queryUserId !== userId) {
-      // The button was pressed by a user who has already acquired permission.
-      await ctx.answerCbQuery(getAlertMessage(languageCode, "alertUserCheck"), {
-        show_alert: true
-      });
-      return ;
-
-    } else if (queryUserId === userId) {
-      // If you clicked your own message, turn off the restriction.
-      await ctx.restrictChatMember(userId, {
-        permissions: {
-          can_send_messages: true
-        }
-      });
-
-      // Delete message
-      const timeout = this.messageTimeouts.get(messageId);
-      if (timeout) {
-        clearTimeout(timeout);
-        await ctx.deleteMessage(messageId);
-
-        this.messageTimeouts.delete(messageId);
-        const notice = getWelcomeNotice(languageCode, userName);
-        
-        try {
-          await ctx.sendPhoto({
-            source: 'public/firmachain.png'
-          }, {
+          const notice = getWelcomeNotice(languageCode, firstName);
+          const noticeMessage = await ctx.sendPhoto(
+            {
+              source: 'public/firmachain.png'
+            }, {
             caption: notice.message,
             reply_markup: notice.query.reply_markup,
             parse_mode: 'Markdown'
           });
-        } catch (e) {
-          console.log(e);
+
+          // 
+          this.fileService.appendNoticeMessage(chatId, noticeMessage.message_id);
+          
+          // 
+          const shiftNoticeMessage = this.fileService.shiftNoticeMessage();
+          if (shiftNoticeMessage !== null) {
+            try {
+              const editMessage = await ctx.telegram.editMessageReplyMarkup(
+                shiftNoticeMessage.chatId,
+                shiftNoticeMessage.messageId,
+                "Deleting...",
+                null);
+
+              if (editMessage) {
+                console.log('[NOTICE] The message exists.');
+                await ctx.deleteMessage(shiftNoticeMessage.messageId);
+              } else {
+                console.log('[NOTICE] The message does not exist.');
+              }
+            } catch (e) {
+              console.error('[NOTICE] Failed to query message.');
+            }
+          }
+
+          //
+          this.fileService.removeRestrictMessage(ctx.chat.id, messageId);
+        } else {
+          await ctx.answerCbQuery(`Sorry, ${ctx.callbackQuery.from.first_name}, this is not your button!`, {
+            show_alert: true
+          });
         }
+      } else {
+        await ctx.answerCbQuery(getAlertMessage(ctx.callbackQuery.from.language_code, "alertNotFoundMessage"), {
+          show_alert: true
+        });
       }
+    } catch (e) {
+      console.error(e);
     }
   }
 
   @On('left_chat_member')
   async leftChatMember(@Ctx() ctx: Context): Promise<void> {
-    const messageDate = ctx.message.date;
-    const messageId = ctx.message.message_id;
-    const userId = ctx.message.from.id;
-
-    if (this.startDate >= messageDate) {
-      // winston log
-      // Exclude users who accessed before running the bot.
-      return ;
+    if (this.startTime <= ctx.message.date) {
+      return;
     }
 
-    await ctx.deleteMessage(messageId);
-  }
-
-  @Timeout(1000 * 60 * 5)
-  cleanup() {
-    this.schedulerRegistry.getTimeouts().forEach((timeout) => {
-      clearTimeout(timeout);
-      this.schedulerRegistry.deleteTimeout(timeout);
-    });
+    await ctx.deleteMessage(ctx.message.message_id);
   }
 }
