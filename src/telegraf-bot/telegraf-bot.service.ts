@@ -1,11 +1,14 @@
+import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Ctx, On, Update, Action } from 'nestjs-telegraf';
 import { Context, Markup } from 'telegraf';
 import { User } from 'telegraf/typings/core/types/typegram';
-import { ConfigService } from '@nestjs/config';
-import { Injectable } from '@nestjs/common';
+import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
+import { Logger } from 'winston';
 
+import { FileService } from '../file/file.service';
 import { getAlertMessage, getRestrictPermission, getWelcomeNotice } from '../common/message.common';
-import { FileService } from 'src/file/fileService.service';
+import { LOGGER_BOTCHECK, LOGGER_ERROR, LOGGER_EXCEPTION, LOGGER_INFO } from '../common/logger.common';
 
 @Injectable()
 @Update()
@@ -15,7 +18,8 @@ export class TelegrafBotService {
   
   constructor(
     private readonly configService: ConfigService,
-    private readonly fileService: FileService
+    private readonly fileService: FileService,
+    @Inject(WINSTON_MODULE_PROVIDER) private readonly logger: Logger
   ) {
     this.groupChatId = this.configService.get<string>('GROUP_CHAT_ID');
     this.startTime = Date.now();
@@ -28,15 +32,22 @@ export class TelegrafBotService {
         return;
       }
 
-      // Delete group join message
-      await ctx.deleteMessage(ctx.message.message_id);
+      try {
+        // Delete group join message
+        await ctx.deleteMessage(ctx.message.message_id);
+      } catch (e) {
+        this.logger.log(LOGGER_EXCEPTION, `❌ Failed delete join message. * { firstName: ${ctx.message.from.first_name}, id: ${ctx.message.message_id}}`);
+      }
 
       // Data exists unconditionally because this function is accessed only when an event defined in the decorator occurs.
       // So you don't have to use the phrase "try catch".
       const newChatMembers: User[] = ctx.update['message']['new_chat_members'];
 
+      console.log(newChatMembers.length);
       for (const member of newChatMembers) {
         if (!member.is_bot) {
+          this.logger.log(LOGGER_INFO, `🟢 Join member in group chat. * { name: ${member.first_name} id: ${member.id}}`);
+
           // Setting restrict permissions for users who participate in a group
           await ctx.restrictChatMember(member.id, {
             permissions: {
@@ -56,21 +67,38 @@ export class TelegrafBotService {
           const firstName = ctx.message.from.first_name;
           const chatId = ctx.chat.id;
 
-          const restrictInfo = getRestrictPermission(languageCode, firstName);
-          const restrictMessage = await ctx.reply(restrictInfo.message, Markup.inlineKeyboard([
-            Markup.button.callback(restrictInfo.button, `unrestrict-${member.id}`)
-          ]));
+          try {
+            const restrictInfo = getRestrictPermission(languageCode, firstName);
+            const restrictMessage = await ctx.reply(restrictInfo.message, Markup.inlineKeyboard([
+              Markup.button.callback(restrictInfo.button, `unrestrict-${member.id}`)
+            ]));
 
-          // Registering the message deletion scheduler.
-          this.fileService.appendRestrictMessage(chatId, restrictMessage.message_id, Date.now());
+            // Registering the message deletion scheduler.
+            this.fileService.appendRestrictMessage(chatId, restrictMessage.message_id, Date.now());
+          } catch (e) {
+            this.logger.log(LOGGER_EXCEPTION, `❌ Failed restrict member. * { name: ${member.first_name} id: ${member.id}}`);
+          }
         } else {
-          await ctx.banChatMember(member.id);
+          try {
+            // Bot account is banned
+            await ctx.banChatMember(member.id);
+
+            // Write log for ban log
+            this.logger.log(LOGGER_BOTCHECK, `🟢 Bot user is banned. * { firstName: ${member.first_name}, id: ${member.id}}`);
+          } catch (e) {
+            this.logger.log(LOGGER_EXCEPTION, `❌ Failed banned bot user. * { firstName: ${member.first_name}, id: ${member.id}}`);
+          }
         }
       }
     } else {
-      await ctx.answerCbQuery("Unacceptable group channel.", {
-        show_alert: true
-      });
+      // Show alert message
+      try {
+        await ctx.answerCbQuery("Unacceptable group channel.", {
+          show_alert: true
+        });
+      } catch (e) {
+        this.logger.log(LOGGER_EXCEPTION, `❌ Failed show alert message. * { firstName: null, id: null}`);
+      }
     }
   }
 
@@ -100,10 +128,8 @@ export class TelegrafBotService {
             parse_mode: 'Markdown'
           });
 
-          // 
           this.fileService.appendNoticeMessage(chatId, noticeMessage.message_id);
           
-          // 
           const shiftNoticeMessage = this.fileService.shiftNoticeMessage();
           if (shiftNoticeMessage !== null) {
             try {
@@ -114,30 +140,34 @@ export class TelegrafBotService {
                 null);
 
               if (editMessage) {
-                console.log('[NOTICE] The message exists.');
+                // Found the message and proceed with deletion.
                 await ctx.deleteMessage(shiftNoticeMessage.messageId);
+
+                this.logger.log(LOGGER_INFO, `🟢 Delete the message.`);
               } else {
-                console.log('[NOTICE] The message does not exist.');
+                this.logger.log(LOGGER_ERROR, `🔴 The message you want to delete does not exist. id - '${shiftNoticeMessage.messageId}`);
               }
             } catch (e) {
-              console.error('[NOTICE] Failed to query message.');
+              this.logger.log(LOGGER_EXCEPTION, `❌ Message lookup failed. id - '${shiftNoticeMessage.messageId}`);
             }
           }
 
-          //
+          // Excludes deleted message IDs from text files.
           this.fileService.removeRestrictMessage(ctx.chat.id, messageId);
+          this.logger.log(LOGGER_INFO, `🟢 Excludes deleted message IDs from text files.`);
         } else {
-          await ctx.answerCbQuery(`Sorry, ${ctx.callbackQuery.from.first_name}, this is not your button!`, {
+          await ctx.answerCbQuery(getAlertMessage(languageCode, "alertUserCheck"), {
             show_alert: true
           });
         }
       } else {
+        // This is not an area where the languageCode variable exists.
         await ctx.answerCbQuery(getAlertMessage(ctx.callbackQuery.from.language_code, "alertNotFoundMessage"), {
           show_alert: true
         });
       }
     } catch (e) {
-      console.error(e);
+      this.logger.log(LOGGER_EXCEPTION, `❌ Error in CallbackQuery function. error - ${e}`);
     }
   }
 

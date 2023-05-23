@@ -1,15 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { WINSTON_MODULE_PROVIDER } from 'nest-winston';
+import { Logger } from 'winston';
 import { readFileSync, writeFileSync } from 'fs';
 
 import { MessageInfo } from '../interfaces/message.interface';
-import { ConfigService } from '@nestjs/config';
+import { LOGGER_EXCEPTION } from '../common/logger.common';
 
 @Injectable()
 export class FileService {
   private restrictFilePath: string;
   private noticeFilePath: string;
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    @Inject(WINSTON_MODULE_PROVIDER) private readonly logger: Logger) {
     this.restrictFilePath = this.configService.get<string>('RESTRICT_FILE_PATH');
     this.noticeFilePath = this.configService.get<string>('NOTICE_FILE_PATH');
   }
@@ -19,7 +24,7 @@ export class FileService {
       const content = readFileSync(this.restrictFilePath, 'utf8');
       return JSON.parse(content);
     } catch (e) {
-      console.error(e);
+      this.logger.log(LOGGER_EXCEPTION, `❌ Error in "readRestrictFile" function. error - ${e}`);
       return [];
     }
   }
@@ -28,7 +33,7 @@ export class FileService {
     try {
       writeFileSync(this.restrictFilePath, JSON.stringify(content), { flag: 'w', encoding: 'utf8' });
     } catch (e) {
-      console.error(e);
+      this.logger.log(LOGGER_EXCEPTION, `❌ Error in "writeRestrictFile" function. error - ${e}`);
     }
   }
 
@@ -49,7 +54,7 @@ export class FileService {
       const content = readFileSync(this.noticeFilePath, 'utf8');
       return JSON.parse(content);
     } catch (e) {
-      console.error(e);
+      this.logger.log(LOGGER_EXCEPTION, `❌ Error in "readNoticeFile" function. error - ${e}`);
       return [];
     }
   }
@@ -58,7 +63,7 @@ export class FileService {
     try {
       writeFileSync(this.noticeFilePath, JSON.stringify(content), { flag: 'w', encoding: 'utf8' });
     } catch (e) {
-      console.error(e);
+      this.logger.log(LOGGER_EXCEPTION, `❌ Error in "writeNoticeFile" function. error - ${e}`);
     }
   }
 
