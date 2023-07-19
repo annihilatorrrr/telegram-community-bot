@@ -43,7 +43,6 @@ export class TelegrafBotService {
       // So you don't have to use the phrase "try catch".
       const newChatMembers: User[] = ctx.update['message']['new_chat_members'];
 
-      console.log(newChatMembers.length);
       for (const member of newChatMembers) {
         if (!member.is_bot) {
           this.logger.log(LOGGER_INFO, `🟢 Join member in group chat. * { name: ${member.first_name} id: ${member.id}}`);
@@ -63,8 +62,8 @@ export class TelegrafBotService {
             }
           });
 
-          const languageCode = ctx.message.from.language_code;
-          const firstName = ctx.message.from.first_name;
+          const languageCode = member.language_code;
+          const firstName = member.first_name;
           const chatId = ctx.chat.id;
 
           try {
