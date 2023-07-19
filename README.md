@@ -1,56 +1,60 @@
-# FirmaChain Official Telegram Group Bot
+# **FirmaChain Official Telegram Group Bot**
 ![firmachain official bot](https://user-images.githubusercontent.com/93503020/163318773-268e9605-5e9f-4004-b2fa-0a3c05b7545c.png)
-<p>
-The telegram-community-bot manages users who join 'FirmaChain Global Official' Telegram group.
-</p>
-</br>
 
-# Telegram Setting
+<br/>
 
-### 1. Create bot
-![create_new_bot](https://user-images.githubusercontent.com/93503020/163318906-4ff53d84-d915-47ca-8175-46cf06993a13.png)
+## **Overview**
+This project implements a bot for managing the 'FirmaChain Global Official' Telegram group.
 
-<p>
-Start a chat with @BotFather and create a bot.
-Please enter in the order below.
-</p>
+<br/>
 
+## **Features**
+The bot immediately kicks out any new bots that join the chat room, temporarily restricts all rights of new users, and sends a message button for restoring these rights. Users have to click the button within 3 minutes, otherwise the message will be automatically deleted. When the button is clicked, a welcome message is sent to the user, and each time a new user clicks the button, the most recent welcome message is deleted and a new welcome message is sent.
+
+This project uses a separate scheduler process. The scheduler automatically deletes the message 3 minutes later if the user does not click the button to restore rights.
+
+<br/>
+
+## **Environment Setup**
+To set up the environment, you first need to copy the .env.sample file to .env.production and set appropriate values for each environment variable.
+```bash
+# File copy
+$ cp .env.sample .env.production
 ```
-1. /newbot
-2. Bot name that ends with 'bot'. (Check)
-3. Bot name that ends with 'bot'. (Finished)
+- `PORT`: Specifies the port on which the server will run (e.g. 3000).
+
+- `TOKEN`: Specifies the token value of the bot.
+
+- `GROUP_CHAT_ID`: Specifies the ID of the Telegram group chat to be managed.
+
+- `RESTRICT_DELETE_TIME`: Specifies the time in minutes to delete the message after setting the restriction (e.g. 3).
+
+- `RESTRICT_FILE_PATH`: Specifies the path of the file where the restriction message is stored (e.g. public/your_restrict_filename.json).
+
+- `NOTICE_FILE_PATH`: Specifies the path of the file where the notice message is stored (e.g. public/your_notice_filename.json).
+
+<br/>
+
+## **Build Method**
+```bash
+# Clone repository
+$ git clone https://github.com/FirmaChain/telegram-community-bot.git
+
+# Move to project folder
+$ cd telegram-community-bot
+
+# Install necessary packages
+$ npm install
+
+# Copy .env.sample file to .env.production
+$ cp .env.sample .env.production
+
+# Run server
+$ npm run start
 ```
 
-### 2. Create group
-Change the group type to 'public' after creating the group.
-
-### 3. Invite bots & Change bots permissions
-![firmachain official bot admin](https://user-images.githubusercontent.com/93503020/163318929-4e36ea22-9ecf-4f8d-a4ed-466507985689.png)
-
-<p>
-Invite the 'bot' to the group to add it as an administrator and change the permissions as shown above.
-</p>
-
-## How to build Telegram Community Bot
-###  1. Prepare the project directory and npm.
-```
-git clone https://github.com/FirmaChain/telegram-community-bot.git
-npm install
-```
-
-### 2. Set Config
-##### 2-1. config directory
-Please create a config directory on the root path.
-
-##### 2-2. 'locale.config.json'
-Copy the 'locale.config.json' file in the 'sample' directory under the 'config' directory.
-And fill in the appropriate 'json' information in the 'locale.config.json' file in the config directory.
-
-##### 2-3. '.env.production'
-Copy the '.env.sample' file in the 'sample' path to the 'config' path with the file name '.env.production' and set the value.
-
-### 3. Build and Run
-```
-npm install
-npm run start
+In the state where the server is running, the scheduler must be run separately. The scheduler is set to run every minute.
+```bash
+# Run scheduler
+$ npm run start:scheduler
 ```
